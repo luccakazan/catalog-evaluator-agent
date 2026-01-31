@@ -1,0 +1,123 @@
+openapi: 3.0.3
+info:
+  title: Catalog Quality Evaluator API
+  version: 1.0.0
+  description: API for evaluating VTEX product catalog quality
+
+servers:
+  - url: https://catalog-evaluator-api.example.com/v1
+    description: Production server
+
+paths:
+  /evaluate:
+    post:
+      summary: Start catalog quality evaluation
+      description: Upload a CSV file with product IDs and start evaluation process
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: CSV file with product_id column
+              required:
+                - file
+      responses:
+        '202':
+          description: Evaluation started
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  job_id:
+                    type: string
+                    description: Unique job identifier
+                  status:
+                    type: string
+                    enum: [processing]
+                  message:
+                    type: string
+        '400':
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+
+  /status/{job_id}:
+    get:
+      summary: Get evaluation status
+      parameters:
+        - name: job_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Status retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  job_id:
+                    type: string
+                  status:
+                    type: string
+                    enum: [processing, completed, failed]
+                  progress:
+                    type: object
+                    properties:
+                      processed:
+                        type: integer
+                      total:
+                        type: integer
+                      errors:
+                        type: integer
+                  started_at:
+                    type: string
+                    format: date-time
+                  completed_at:
+                    type: string
+                    format: date-time
+        '404':
+          description: Job not found
+
+  /results/{job_id}:
+    get:
+      summary: Download evaluation results
+      parameters:
+        - name: job_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Results file
+          content:
+            text/csv:
+              schema:
+                type: string
+        '404':
+          description: Job not found or not completed
+
+components:
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+      required:
+        - error</content>
+<parameter name="filePath">/Users/lucca.kazan/Documents/study_projects/catalog-evaluator-agent/specs/001-catalog-quality-evaluator/contracts/api.yaml

@@ -1,90 +1,112 @@
-from app.vtex_client import VtexClient
-from app.pipeline import ProductPipeline
-from app.evaluator import ProductDescriptionEvaluator
-from app.storage import CsvStorage
-from app.loaders import load_product_ids_from_csv
+import argparse
+import os
+from datetime import datetime
+from dotenv import load_dotenv
+from typing import List
+from app.services.vtex_client import VtexClient
+from app.services.gemini_evaluator import GeminiEvaluator
+from app.services.database import DatabaseService
+from app.utils.csv_handler import read_product_ids, write_evaluation_results
+from app.models.product import Product
+from app.models.evaluation_result import EvaluationResult
+from app.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 def main():
-    # 1. Carregar ProductIds
-    product_ids = load_product_ids_from_csv("product_ids.csv")
-    print(f"📦 {len(product_ids)} produtos carregados do CSV")
+    # Load environment variables
+    load_dotenv()
 
-    # 2. Inicializar componentes
-    vtex_client = VtexClient(use_mock=False)
-    pipeline = ProductPipeline(vtex_client=vtex_client, batch_size=5)
-    evaluator = ProductDescriptionEvaluator()
-    storage = CsvStorage(file_path="results.csv")
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='Evaluate VTEX product catalog quality')
+    parser.add_argument('--input', '-i', required=True, help='Input CSV file with product_ids')
+    parser.add_argument('--output', '-o', required=True, help='Output CSV file for results')
+    args = parser.parse_args()
 
-    # 3. Rodar pipeline (VTEX + quick_score)
-    batches = pipeline.run(product_ids)
+    logger.info("Starting catalog quality evaluation", extra={'input_file': args.input, 'output_file': args.output})
 
-    # 4. Processar batch a batch
-    for idx, batch in enumerate(batches, start=1):
-        print(f"\n🔹 Avaliando batch {idx} ({len(batch)} produtos)")
+    try:
+        # 1. Read product IDs from CSV
+        product_ids = read_product_ids(args.input)
+        if not product_ids:
+            logger.error("No product IDs found in input file")
+            return
 
-        # ─────────────────────────────
-        # FLUXO 1 — Erros de dado (VTEX)
-        # ─────────────────────────────
-        error_results = [
-            {
-                "product_id": item["product_id"],
-                "score": None,
-                "reason": None,
-                "error": item["error"],
-            }
-            for item in batch
-            if item.get("error") is not None
-        ]
+        # 2. Initialize services
+        vtex_client = VtexClient()
+        gemini_evaluator = GeminiEvaluator()
+        
+        # Database service is optional
+        db_service = None
+        db_instance = os.getenv('DB_INSTANCE_CONNECTION_NAME')
+        db_user = os.getenv('DB_USER')
+        if db_instance and db_user and db_instance != 'your_project:region:instance':
+            try:
+                db_service = DatabaseService()
+            except Exception as e:
+                logger.warning(f"Database initialization failed: {e}. Results will only be saved to CSV.")
+        else:
+            logger.info("Database not configured. Results will only be saved to CSV.")
 
-        if error_results:
-            storage.save_batch(error_results)
+        # 3. Fetch products from VTEX and prepare evaluation results
+        products = []
+        evaluation_results = []
+        
+        for product_id in product_ids:
+            try:
+                product = vtex_client.get_product(product_id)
+                if product and product.description:
+                    products.append(product)
+                else:
+                    # Product not found or no description - create error result
+                    error_result = EvaluationResult(
+                        product_id=product_id,
+                        quality_score=0,  # Special code for not processed
+                        evaluation_timestamp=datetime.utcnow(),
+                        reason="Product not found in VTEX catalog or has no description",
+                        raw_response="VTEX_API_ERROR"
+                    )
+                    evaluation_results.append(error_result)
+                    logger.warning(f"Product {product_id} not found or has no description",
+                                 extra={'product_id': product_id})
+            except Exception as e:
+                # API error - create error result
+                error_result = EvaluationResult(
+                    product_id=product_id,
+                    quality_score=0,  # Special code for API error
+                    evaluation_timestamp=datetime.utcnow(),
+                    reason=f"VTEX API error: {str(e)}",
+                    raw_response="VTEX_API_ERROR"
+                )
+                evaluation_results.append(error_result)
+                logger.error(f"Failed to fetch product {product_id}: {e}",
+                           extra={'product_id': product_id})
 
-        # ─────────────────────────────
-        # FLUXO 2 — Descrição vazia ou muito curta
-        # ─────────────────────────────
-        quick_results = [
-            {
-                "product_id": item["product_id"],
-                "score": 5,
-                "reason": "Descrição vazia ou muito curta",
-                "error": None,
-            }
-            for item in batch
-            if item.get("error") is None and item.get("quick_score") == 5
-        ]
+        if not products:
+            logger.error("No products with descriptions to evaluate")
+            return
 
-        if quick_results:
-            storage.save_batch(quick_results)
+        # 4. Evaluate products with Gemini (only successful fetches)
+        if products:
+            gemini_results = gemini_evaluator.evaluate_products(products)
+            evaluation_results.extend(gemini_results)
+        else:
+            logger.info("No products available for AI evaluation")
 
-        # ─────────────────────────────
-        # FLUXO 3 — Avaliação via LLM
-        # ─────────────────────────────
-        to_evaluate = [
-            item
-            for item in batch
-            if item.get("error") is None and item.get("quick_score") is None
-        ]
+        # 5. Store results in database (optional)
+        if db_service:
+            db_service.store_evaluation_results(products, evaluation_results)
 
-        if not to_evaluate:
-            continue
+        # 6. Write results to CSV
+        write_evaluation_results(evaluation_results, args.output)
 
-        llm_results = evaluator.evaluate_batch(to_evaluate)
+        logger.info("Catalog quality evaluation completed successfully",
+                   extra={'total_products': len(product_ids), 'evaluated_products': len(products)})
 
-        enriched_results = [
-            {
-                "product_id": r["product_id"],
-                "score": r["score"],
-                "reason": r["reason"],
-                "error": None,
-            }
-            for r in llm_results
-        ]
-
-        storage.save_batch(enriched_results)
-        print(f"✅ Batch {idx} salvo com sucesso")
-
-    print("\n🎉 Processamento finalizado com sucesso")
+    except Exception as e:
+        logger.error(f"Pipeline execution failed: {e}")
+        raise
 
 
 if __name__ == "__main__":

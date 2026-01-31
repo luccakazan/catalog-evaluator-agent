@@ -1,0 +1,8 @@
+product_id,quality_score,evaluation_timestamp,reason,raw_response
+999,0,2026-01-31T17:16:01.058977,VTEX API error: RetryError[<Future at 0x166f07e30 state=finished raised HTTPError>],VTEX_API_ERROR
+1,2,2026-01-31T17:16:06.086303,"Good quality. Engaging, error-free, and clear on benefits, but lacks crucial technical specifications expected for running shoes (e.g., weight, drop, specific foam).","SCORE: 2
+REASON: Good quality. Engaging, error-free, and clear on benefits, but lacks crucial technical specifications expected for running shoes (e.g., weight, drop, specific foam)."
+2,3,2026-01-31T17:16:01.820978,"Too short and basic. Missing key details like material, fit, color options, or target audience/use. Not engaging.","SCORE: 3
+REASON: Too short and basic. Missing key details like material, fit, color options, or target audience/use. Not engaging."
+3,3,2026-01-31T17:16:05.285356,"Basic information but lacks specific detail needed for an AJ3 Retro. Grammatical errors (e.g., ""inspired in"") and redundancy lower clarity.","SCORE: 3
+REASON: Basic information but lacks specific detail needed for an AJ3 Retro. Grammatical errors (e.g., ""inspired in"") and redundancy lower clarity."
