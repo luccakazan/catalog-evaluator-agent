@@ -31,12 +31,16 @@ def write_evaluation_results(results: List[EvaluationResult], csv_path: str) -> 
     try:
         data = []
         for result in results:
+            # Clean reason and raw_response to remove newlines and extra spaces
+            clean_reason = (result.reason or '').replace('\n', ' ').replace('\r', ' ').strip()
+            clean_raw_response = (result.raw_response or '').replace('\n', ' ').replace('\r', ' ').strip()
+            
             data.append({
                 'product_id': result.product_id,
                 'quality_score': result.quality_score,
                 'evaluation_timestamp': result.evaluation_timestamp.isoformat(),
-                'reason': result.reason or '',
-                'raw_response': result.raw_response or ''
+                'reason': clean_reason,
+                'raw_response': clean_raw_response
             })
 
         df = pd.DataFrame(data)

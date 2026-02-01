@@ -108,13 +108,14 @@ class DatabaseService:
                     try:
                         conn.execute(
                             text("""
-                                INSERT INTO evaluation_results (product_id, quality_score, evaluation_timestamp, raw_response)
-                                VALUES (:product_id, :quality_score, :evaluation_timestamp, :raw_response)
+                                INSERT INTO evaluation_results (product_id, quality_score, evaluation_timestamp, reason, raw_response)
+                                VALUES (:product_id, :quality_score, :evaluation_timestamp, :reason, :raw_response)
                             """),
                             {
                                 'product_id': result.product_id,
                                 'quality_score': result.quality_score,
                                 'evaluation_timestamp': result.evaluation_timestamp,
+                                'reason': result.reason,
                                 'raw_response': result.raw_response
                             }
                         )
@@ -140,7 +141,7 @@ class DatabaseService:
             with engine.connect() as conn:
                 result = conn.execute(
                     text("""
-                        SELECT product_id, quality_score, evaluation_timestamp, raw_response
+                        SELECT product_id, quality_score, evaluation_timestamp, reason, raw_response
                         FROM evaluation_results
                         ORDER BY evaluation_timestamp DESC
                         LIMIT :limit
@@ -154,7 +155,8 @@ class DatabaseService:
                         product_id=row[0],
                         quality_score=row[1],
                         evaluation_timestamp=row[2],
-                        raw_response=row[3]
+                        reason=row[3],
+                        raw_response=row[4]
                     ))
 
             logger.info(f"Retrieved {len(evaluation_results)} evaluation results")

@@ -25,8 +25,9 @@ CREATE TABLE IF NOT EXISTS products (
 CREATE TABLE IF NOT EXISTS evaluation_results (
     id SERIAL PRIMARY KEY,
     product_id VARCHAR(255) NOT NULL REFERENCES products(product_id),
-    quality_score INTEGER NOT NULL CHECK (quality_score >= 1 AND quality_score <= 5),
+    quality_score INTEGER NOT NULL CHECK (quality_score >= 0 AND quality_score <= 5),
     evaluation_timestamp TIMESTAMP NOT NULL,
+    reason TEXT,
     raw_response TEXT,
     UNIQUE(product_id)
 );

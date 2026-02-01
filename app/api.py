@@ -1,7 +1,7 @@
 import uuid
 import tempfile
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Optional
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse
@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 import pandas as pd
 from app.services.vtex_client import VtexClient
 from app.services.gemini_evaluator import GeminiEvaluator
-from app.services.database import DatabaseService
+from app.services.cloud_storage import CloudStorageService
 from app.utils.csv_handler import read_product_ids, write_evaluation_results
 from app.models.product import Product
 from app.models.evaluation_result import EvaluationResult
@@ -24,6 +24,12 @@ app = FastAPI(title="Catalog Quality Evaluator API", version="1.0.0")
 
 # In-memory job storage (for production, use database or Redis)
 jobs: Dict[str, Dict] = {}
+
+
+@app.get("/health")
+async def health_check() -> Dict:
+    """Health check endpoint."""
+    return {"status": "healthy", "version": "1.0.0"}
 
 
 @app.post("/evaluate")
@@ -47,7 +53,7 @@ async def evaluate_catalog(
     # Initialize job status
     jobs[job_id] = {
         'status': 'processing',
-        'started_at': datetime.utcnow(),
+        'started_at': datetime.now(timezone.utc),
         'input_file': input_file,
         'progress': {'processed': 0, 'total': 0, 'errors': 0}
     }
@@ -91,18 +97,44 @@ async def get_job_results(job_id: str):
         raise HTTPException(status_code=404, detail="Job not completed")
 
     results_file = job.get('results_file')
-    if not results_file or not os.path.exists(results_file):
+    if not results_file:
         raise HTTPException(status_code=404, detail="Results file not found")
 
-    def iter_file():
-        with open(results_file, 'rb') as f:
-            yield from f
+    # Check if results are in Cloud Storage (GCS URL) or local file
+    if results_file.startswith('gs://'):
+        # Download from Cloud Storage
+        try:
+            bucket_name = os.getenv('GCS_BUCKET_NAME', 'catalog-evaluator-results')
+            filename = f"results_{job_id}.csv"
+            
+            storage_service = CloudStorageService()
+            csv_content = storage_service.download_results_csv(filename)
+            
+            def iter_content():
+                yield csv_content.encode('utf-8')
+            
+            return StreamingResponse(
+                iter_content(),
+                media_type='text/csv',
+                headers={"Content-Disposition": f"attachment; filename=results_{job_id}.csv"}
+            )
+        except Exception as e:
+            logger.error(f"Failed to download from Cloud Storage: {e}")
+            raise HTTPException(status_code=500, detail="Failed to download results")
+    else:
+        # Local file fallback
+        if not os.path.exists(results_file):
+            raise HTTPException(status_code=404, detail="Results file not found")
 
-    return StreamingResponse(
-        iter_file(),
-        media_type='text/csv',
-        headers={"Content-Disposition": f"attachment; filename=results_{job_id}.csv"}
-    )
+        def iter_file():
+            with open(results_file, 'rb') as f:
+                yield from f
+
+        return StreamingResponse(
+            iter_file(),
+            media_type='text/csv',
+            headers={"Content-Disposition": f"attachment; filename=results_{job_id}.csv"}
+        )
 
 
 def process_evaluation_job(job_id: str):
@@ -118,7 +150,21 @@ def process_evaluation_job(job_id: str):
         # Initialize services
         vtex_client = VtexClient()
         gemini_evaluator = GeminiEvaluator()
-        db_service = DatabaseService()
+        
+        # Initialize Cloud Storage (cheaper than database!)
+        storage_service = CloudStorageService()
+        storage_service.ensure_bucket_exists()
+        
+        # Optional database service (only if configured)
+        db_service = None
+        if os.getenv('DB_INSTANCE_CONNECTION_NAME') and os.getenv('DB_INSTANCE_CONNECTION_NAME') != 'your_project:region:instance':
+            try:
+                from app.services.database import DatabaseService
+                db_service = DatabaseService()
+            except ImportError as e:
+                logger.warning(f"Database dependencies not installed: {e}. Using Cloud Storage only.")
+            except Exception as e:
+                logger.warning(f"Database initialization failed: {e}. Using Cloud Storage only.")
 
         # Fetch products and prepare evaluation results
         products = []
@@ -134,7 +180,7 @@ def process_evaluation_job(job_id: str):
                     error_result = EvaluationResult(
                         product_id=product_id,
                         quality_score=0,
-                        evaluation_timestamp=datetime.utcnow(),
+                        evaluation_timestamp=datetime.now(timezone.utc),
                         reason="Product not found in VTEX catalog or has no description",
                         raw_response="VTEX_API_ERROR"
                     )
@@ -146,7 +192,7 @@ def process_evaluation_job(job_id: str):
                 error_result = EvaluationResult(
                     product_id=product_id,
                     quality_score=0,
-                    evaluation_timestamp=datetime.utcnow(),
+                    evaluation_timestamp=datetime.now(timezone.utc),
                     reason=f"VTEX API error: {str(e)}",
                     raw_response="VTEX_API_ERROR"
                 )
@@ -166,19 +212,31 @@ def process_evaluation_job(job_id: str):
 
         # Store results in database (optional)
         if evaluation_results:
+            if db_service:
+                try:
+                    db_service.store_evaluation_results(products, evaluation_results)
+                except Exception as e:
+                    logger.warning(f"Database storage failed: {e}. Results stored in Cloud Storage only.")
+            
+            # Always store results in Cloud Storage (much cheaper!)
             try:
-                db_service.store_evaluation_results(products, evaluation_results)
+                gcs_filename = f"results_{job_id}.csv"
+                gcs_url = storage_service.upload_results_csv(evaluation_results, gcs_filename)
+                job['results_file'] = gcs_url
+                logger.info(f"Results stored in Cloud Storage: {gcs_url}")
             except Exception as e:
-                logger.warning(f"Database storage failed: {e}. Results will only be saved to CSV.")
-
-        # Write results to temp file
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.csv') as temp_file:
-            write_evaluation_results(evaluation_results, temp_file.name)
-            job['results_file'] = temp_file.name
+                logger.error(f"Cloud Storage upload failed: {e}")
+                # Fallback: store locally
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.csv') as temp_file:
+                    write_evaluation_results(evaluation_results, temp_file.name)
+                    job['results_file'] = temp_file.name
+                    logger.warning("Using local storage as fallback")
+        else:
+            logger.warning("No evaluation results to store")
 
         # Update job status
         job['status'] = 'completed'
-        job['completed_at'] = datetime.utcnow()
+        job['completed_at'] = datetime.now(timezone.utc)
 
         logger.info("Completed evaluation job", extra={'job_id': job_id})
 

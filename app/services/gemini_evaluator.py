@@ -2,7 +2,7 @@ import os
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 import google.genai as genai
 from app.models.product import Product
 from app.models.evaluation_result import EvaluationResult
@@ -131,7 +131,7 @@ Response:"""
             return EvaluationResult(
                 product_id=product.product_id,
                 quality_score=0,
-                evaluation_timestamp=datetime.utcnow(),
+                evaluation_timestamp=datetime.now(timezone.utc),
                 reason=f"Evaluation failed: {str(e)}",
                 raw_response=str(e)
             )

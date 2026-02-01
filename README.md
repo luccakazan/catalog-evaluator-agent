@@ -2,16 +2,27 @@
 
 This is a quick hobby project to experiment with Spec Kit.
 
-It builds a service that evaluates VTEX product catalog quality by fetching product data via API, analyzing descriptions with Google Gemini LLM, and storing results in CSV and Cloud SQL PostgreSQL.
+It builds a service that evaluates VTEX product catalog quality by fetching product data via API, analyzing descriptions with Google Gemini LLM, and storing results in CSV and Google Cloud Storage (much cheaper than database!).
 
 ## Features
 
 - **CSV Processing**: Read product IDs from CSV files
 - **VTEX Integration**: Fetch product details via VTEX Catalog API
 - **AI Evaluation**: Analyze product descriptions using Google Gemini
-- **Database Storage**: Persist results in Cloud SQL PostgreSQL
+- **Cloud Storage**: Store results cheaply in Google Cloud Storage ($3/month vs $12/month for database)
+- **Database Optional**: Cloud SQL PostgreSQL support for complex queries
 - **REST API**: FastAPI-based endpoints for web integration
 - **Cloud Deployment**: Ready for Google Cloud Run
+
+## Cost Comparison
+
+| Storage Method | Monthly Cost | Use Case |
+|----------------|-------------|----------|
+| **Cloud Storage** | $3/month | ✅ Recommended - File storage, batch processing |
+| **Cloud SQL** | $12+/month | Complex queries, real-time data |
+| **Local CSV** | $0 | Development only |
+
+**💡 Pro Tip**: Use Cloud Storage! It's 75% cheaper and perfect for your use case.
 
 ## Quick Start
 
@@ -48,11 +59,16 @@ VTEX_ACCOUNT_NAME=your_account
 # Google Gemini
 GOOGLE_API_KEY=your_gemini_key
 
-# Database (optional)
+# Cloud Storage (recommended - $3/month)
+GCS_BUCKET_NAME=catalog-evaluator-results
+
+# Database (optional - $12+/month)
 DB_INSTANCE_CONNECTION_NAME=project:region:instance
 DB_NAME=catalog_evaluator
 DB_USER=your_user
 ```
+
+**Note**: You only need either Cloud Storage OR Database. Cloud Storage is much cheaper!
 
 ### Usage
 
@@ -104,6 +120,38 @@ Check evaluation progress.
 
 ### GET /results/{job_id}
 Download evaluation results CSV.
+
+## Testing
+
+### Test Cloud Storage Integration
+
+```bash
+# Test Cloud Storage upload/download
+python test_gcs.py
+```
+
+### Test Full Pipeline
+
+```bash
+# Test with sample data
+python app/main.py --input test_products.csv --output test_results.csv
+
+# Check results
+head -5 test_results.csv
+```
+
+### Test API Endpoints
+
+```bash
+# Start API server
+uvicorn app.api:app --host 0.0.0.0 --port 8000
+
+# In another terminal, test endpoints
+curl -X POST "http://localhost:8000/evaluate" \
+  -F "file=@test_products.csv"
+
+# Check status and download results
+```
 
 ## Deployment
 
