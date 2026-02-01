@@ -44,7 +44,7 @@ def write_evaluation_results(results: List[EvaluationResult], csv_path: str) -> 
             })
 
         df = pd.DataFrame(data)
-        df.to_csv(csv_path, index=False)
+        df.to_csv(csv_path, index=False, quoting=1)  # QUOTE_ALL to ensure all fields are quoted
         logger.info(f"Wrote {len(results)} evaluation results to {csv_path}")
 
     except Exception as e:
