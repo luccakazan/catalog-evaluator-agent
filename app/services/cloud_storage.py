@@ -26,14 +26,32 @@ class CloudStorageService:
     def upload_results_csv(self, results: List[EvaluationResult], filename: str) -> str:
         """Upload evaluation results as CSV to Cloud Storage."""
         try:
-            # Convert results to CSV format
-            csv_content = "product_id,quality_score,evaluation_timestamp,reason,raw_response\n"
+            import io
+            import csv
+            
+            # Create CSV content with proper formatting
+            output = io.StringIO()
+            writer = csv.writer(output, quoting=csv.QUOTE_ALL)
+            
+            # Write header
+            writer.writerow(['product_id', 'quality_score', 'evaluation_timestamp', 'reason', 'raw_response'])
+            
+            # Write data rows
             for result in results:
                 # Clean reason and raw_response to remove newlines and extra spaces
                 clean_reason = (result.reason or '').replace('\n', ' ').replace('\r', ' ').strip()
                 clean_raw_response = (result.raw_response or '').replace('\n', ' ').replace('\r', ' ').strip()
                 
-                csv_content += f"{result.product_id},{result.quality_score},{result.evaluation_timestamp.isoformat()},{clean_reason},{clean_raw_response}\n"
+                writer.writerow([
+                    result.product_id,
+                    result.quality_score,
+                    result.evaluation_timestamp.isoformat(),
+                    clean_reason,
+                    clean_raw_response
+                ])
+            
+            csv_content = output.getvalue()
+            output.close()
 
             # Upload to GCS
             blob = self.bucket.blob(filename)
