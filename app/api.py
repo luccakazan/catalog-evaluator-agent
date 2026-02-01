@@ -3,7 +3,9 @@ import tempfile
 import os
 from datetime import datetime, timezone
 from typing import Dict, Optional
-from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks
+from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Depends, Header
+from fastapi.responses import StreamingResponse
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
 import pandas as pd
@@ -22,6 +24,15 @@ logger = get_logger(__name__)
 
 app = FastAPI(title="Catalog Quality Evaluator API", version="1.0.0")
 
+# API Key security
+API_KEY = os.getenv('API_KEY', 'your-secret-api-key-here')  # Change this to a secure key
+
+async def verify_api_key(x_api_key: str = Header(..., alias="X-API-Key")):
+    """Verify API key from request header."""
+    if x_api_key != API_KEY:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+    return x_api_key
+
 # In-memory job storage (for production, use database or Redis)
 jobs: Dict[str, Dict] = {}
 
@@ -32,7 +43,7 @@ async def health_check() -> Dict:
     return {"status": "healthy", "version": "1.0.0"}
 
 
-@app.post("/evaluate")
+@app.post("/evaluate", dependencies=[Depends(verify_api_key)])
 async def evaluate_catalog(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...)
@@ -86,7 +97,7 @@ async def get_job_status(job_id: str) -> Dict:
     }
 
 
-@app.get("/results/{job_id}")
+@app.get("/results/{job_id}", dependencies=[Depends(verify_api_key)])
 async def get_job_results(job_id: str):
     """Download evaluation results CSV."""
     if job_id not in jobs:

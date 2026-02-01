@@ -66,6 +66,9 @@ GCS_BUCKET_NAME=catalog-evaluator-results
 DB_INSTANCE_CONNECTION_NAME=project:region:instance
 DB_NAME=catalog_evaluator
 DB_USER=your_user
+
+# API Security
+API_KEY=your-secure-api-key-change-this-in-production
 ```
 
 **Note**: You only need either Cloud Storage OR Database. Cloud Storage is much cheaper!
@@ -88,8 +91,19 @@ Then upload CSV via POST to `/evaluate`.
 
 ## API Documentation
 
+### Authentication
+All API endpoints (except `/health`) require API key authentication. Include the API key in the `X-API-Key` header:
+
+```bash
+curl -H "X-API-Key: your-secure-api-key" \
+  -X POST "http://localhost:8000/evaluate" \
+  -F "file=@products.csv"
+```
+
 ### POST /evaluate
 Upload a CSV file with product IDs to start evaluation.
+
+**Authentication**: Required (X-API-Key header)
 
 **Request**: Multipart form with `file` field containing CSV.
 
@@ -121,6 +135,8 @@ Check evaluation progress.
 ### GET /results/{job_id}
 Download evaluation results CSV.
 
+**Authentication**: Required (X-API-Key header)
+
 ## Testing
 
 ### Test Cloud Storage Integration
@@ -147,10 +163,17 @@ head -5 test_results.csv
 uvicorn app.api:app --host 0.0.0.0 --port 8000
 
 # In another terminal, test endpoints
-curl -X POST "http://localhost:8000/evaluate" \
+curl -H "X-API-Key: your-secure-api-key" \
+  -X POST "http://localhost:8000/evaluate" \
   -F "file=@test_products.csv"
 
-# Check status and download results
+# Check status (no auth required)
+curl -X GET "http://localhost:8000/status/job-uuid"
+
+# Download results (auth required)
+curl -H "X-API-Key: your-secure-api-key" \
+  -X GET "http://localhost:8000/results/job-uuid" \
+  -o results.csv
 ```
 
 ## Deployment
