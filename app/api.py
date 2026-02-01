@@ -9,8 +9,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
 import pandas as pd
-from app.services.vtex_client import VtexClient
-from app.services.gemini_evaluator import GeminiEvaluator
+from app.services.evaluation_service import EvaluationService
 from app.services.cloud_storage import CloudStorageService
 from app.utils.csv_handler import read_product_ids, write_evaluation_results
 from app.models.product import Product
@@ -158,10 +157,16 @@ def process_evaluation_job(job_id: str):
         product_ids = read_product_ids(input_file)
         job['progress']['total'] = len(product_ids)
 
-        # Initialize services
-        vtex_client = VtexClient()
-        gemini_evaluator = GeminiEvaluator()
-        
+        # Initialize evaluation service
+        evaluation_service = EvaluationService()
+
+        # Evaluate catalog
+        products, evaluation_results = evaluation_service.evaluate_catalog(product_ids)
+
+        # Update progress
+        job['progress']['processed'] = len(product_ids)
+        job['progress']['errors'] = sum(1 for result in evaluation_results if result.quality_score == 0)
+
         # Initialize Cloud Storage (cheaper than database!)
         storage_service = CloudStorageService()
         storage_service.ensure_bucket_exists()
@@ -176,50 +181,6 @@ def process_evaluation_job(job_id: str):
                 logger.warning(f"Database dependencies not installed: {e}. Using Cloud Storage only.")
             except Exception as e:
                 logger.warning(f"Database initialization failed: {e}. Using Cloud Storage only.")
-
-        # Fetch products and prepare evaluation results
-        products = []
-        evaluation_results = []
-        
-        for i, product_id in enumerate(product_ids):
-            try:
-                product = vtex_client.get_product(product_id)
-                if product and product.description:
-                    products.append(product)
-                else:
-                    # Product not found or no description - create error result
-                    error_result = EvaluationResult(
-                        product_id=product_id,
-                        quality_score=0,
-                        evaluation_timestamp=datetime.now(timezone.utc),
-                        reason="Product not found in VTEX catalog or has no description",
-                        raw_response="VTEX_API_ERROR"
-                    )
-                    evaluation_results.append(error_result)
-                    logger.warning(f"Product {product_id} not found or has no description",
-                                 extra={'product_id': product_id})
-            except Exception as e:
-                # API error - create error result
-                error_result = EvaluationResult(
-                    product_id=product_id,
-                    quality_score=0,
-                    evaluation_timestamp=datetime.now(timezone.utc),
-                    reason=f"VTEX API error: {str(e)}",
-                    raw_response="VTEX_API_ERROR"
-                )
-                evaluation_results.append(error_result)
-                logger.error(f"Failed to fetch product {product_id}: {e}",
-                           extra={'product_id': product_id})
-            
-            job['progress']['processed'] = i + 1
-            job['progress']['errors'] += 1 if evaluation_results and evaluation_results[-1].quality_score == 0 else 0
-
-        # Evaluate products with Gemini (only successful fetches)
-        if products:
-            gemini_results = gemini_evaluator.evaluate_products(products)
-            evaluation_results.extend(gemini_results)
-        else:
-            logger.info("No products available for AI evaluation")
 
         # Store results in database (optional)
         if evaluation_results:

@@ -14,16 +14,6 @@ It builds a service that evaluates VTEX product catalog quality by fetching prod
 - **REST API**: FastAPI-based endpoints for web integration
 - **Cloud Deployment**: Ready for Google Cloud Run
 
-## Cost Comparison
-
-| Storage Method | Monthly Cost | Use Case |
-|----------------|-------------|----------|
-| **Cloud Storage** | $3/month | ✅ Recommended - File storage, batch processing |
-| **Cloud SQL** | $12+/month | Complex queries, real-time data |
-| **Local CSV** | $0 | Development only |
-
-**💡 Pro Tip**: Use Cloud Storage! It's 75% cheaper and perfect for your use case.
-
 ## Quick Start
 
 ### Prerequisites
@@ -71,14 +61,14 @@ DB_USER=your_user
 API_KEY=your-secure-api-key-change-this-in-production
 ```
 
-**Note**: You only need either Cloud Storage OR Database. Cloud Storage is much cheaper!
+**Note**: You only need either Cloud Storage OR Database.
 
 ### Usage
 
 #### Command Line
 
 ```bash
-python app/main.py --input products.csv --output results.csv
+python -m app.main --input products.csv --output results.csv
 ```
 
 #### API Server
@@ -150,7 +140,7 @@ python test_gcs.py
 
 ```bash
 # Test with sample data
-python app/main.py --input test_products.csv --output test_results.csv
+python -m app.main --input test_products.csv --output test_results.csv
 
 # Check results
 head -5 test_results.csv
@@ -159,19 +149,23 @@ head -5 test_results.csv
 ### Test API Endpoints
 
 ```bash
-# Start API server
+# Start API server in one terminal
 uvicorn app.api:app --host 0.0.0.0 --port 8000
 
 # In another terminal, test endpoints
-curl -H "X-API-Key: your-secure-api-key" \
+# First, test health (no auth required)
+curl -X GET "http://localhost:8000/health"
+
+# Upload CSV for evaluation (replace <YOUR_API_KEY_FROM_ENV> with the value from your .env file)
+curl -H "X-API-Key: <YOUR_API_KEY_FROM_ENV>" \
   -X POST "http://localhost:8000/evaluate" \
   -F "file=@test_products.csv"
 
-# Check status (no auth required)
+# Check status (no auth required) - replace job-uuid with the actual job_id from the response
 curl -X GET "http://localhost:8000/status/job-uuid"
 
-# Download results (auth required)
-curl -H "X-API-Key: your-secure-api-key" \
+# Download results (replace YOUR_API_KEY and job-uuid)
+curl -H "X-API-Key: YOUR_API_KEY" \
   -X GET "http://localhost:8000/results/job-uuid" \
   -o results.csv
 ```
@@ -185,7 +179,7 @@ curl -H "X-API-Key: your-secure-api-key" \
 uvicorn app.api:app --host 0.0.0.0 --port 8000
 
 # Run CLI
-python app/main.py --input test.csv --output results.csv
+python -m app.main --input test.csv --output results.csv
 ```
 
 ### Google Cloud Run
@@ -234,7 +228,7 @@ CSV Input → VTEX API → Product Models → Gemini Evaluation → Results → 
 
 ## Performance
 
-- Processes ~1000 products in 1-2 hours
+- Processes ~1000 products
 - Batch size: 5-10 concurrent evaluations
 - Built-in retry logic for API failures
 
@@ -247,4 +241,4 @@ CSV Input → VTEX API → Product Models → Gemini Evaluation → Results → 
 
 ## License
 
-This was a hobby project testing spec kit, nobody should use it really. But feel free
+This is a hobby project testing spec kit, nobody should use it really. But feel free

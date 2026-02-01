@@ -3,8 +3,7 @@ import os
 from datetime import datetime, timezone
 from dotenv import load_dotenv
 from typing import List
-from app.services.vtex_client import VtexClient
-from app.services.gemini_evaluator import GeminiEvaluator
+from app.services.evaluation_service import EvaluationService
 from app.services.cloud_storage import CloudStorageService
 from app.utils.csv_handler import read_product_ids, write_evaluation_results
 from app.models.product import Product
@@ -33,11 +32,17 @@ def main():
             logger.error("No product IDs found in input file")
             return
 
-        # 2. Initialize services
-        vtex_client = VtexClient()
-        gemini_evaluator = GeminiEvaluator()
-        
-        # Cloud Storage service (for storing results cheaply)
+        # 2. Initialize evaluation service
+        evaluation_service = EvaluationService()
+
+        # 3. Evaluate catalog
+        products, evaluation_results = evaluation_service.evaluate_catalog(product_ids)
+
+        if not evaluation_results:
+            logger.error("No evaluation results generated")
+            return
+
+        # 4. Initialize Cloud Storage service (optional, cheaper alternative)
         storage_service = None
         if os.getenv('GCS_BUCKET_NAME'):
             try:
@@ -47,7 +52,7 @@ def main():
             except Exception as e:
                 logger.warning(f"Cloud Storage initialization failed: {e}")
         
-        # Database service is optional
+        # 5. Initialize Database service (optional)
         db_service = None
         db_instance = os.getenv('DB_INSTANCE_CONNECTION_NAME')
         db_user = os.getenv('DB_USER')
@@ -62,59 +67,14 @@ def main():
         else:
             logger.info("Database not configured. Results will be saved to CSV/Cloud Storage.")
 
-        # 3. Fetch products from VTEX and prepare evaluation results
-        products = []
-        evaluation_results = []
-        
-        for product_id in product_ids:
-            try:
-                product = vtex_client.get_product(product_id)
-                if product and product.description:
-                    products.append(product)
-                else:
-                    # Product not found or no description - create error result
-                    error_result = EvaluationResult(
-                        product_id=product_id,
-                        quality_score=0,  # Special code for not processed
-                        evaluation_timestamp=datetime.now(timezone.utc),
-                        reason="Product not found in VTEX catalog or has no description",
-                        raw_response="VTEX_API_ERROR"
-                    )
-                    evaluation_results.append(error_result)
-                    logger.warning(f"Product {product_id} not found or has no description",
-                                 extra={'product_id': product_id})
-            except Exception as e:
-                # API error - create error result
-                error_result = EvaluationResult(
-                    product_id=product_id,
-                    quality_score=0,  # Special code for API error
-                    evaluation_timestamp=datetime.now(timezone.utc),
-                    reason=f"VTEX API error: {str(e)}",
-                    raw_response="VTEX_API_ERROR"
-                )
-                evaluation_results.append(error_result)
-                logger.error(f"Failed to fetch product {product_id}: {e}",
-                           extra={'product_id': product_id})
-
-        if not products:
-            logger.error("No products with descriptions to evaluate")
-            return
-
-        # 4. Evaluate products with Gemini (only successful fetches)
-        if products:
-            gemini_results = gemini_evaluator.evaluate_products(products)
-            evaluation_results.extend(gemini_results)
-        else:
-            logger.info("No products available for AI evaluation")
-
-        # 5. Store results in database (optional)
+        # 6. Store results in database (optional)
         if db_service:
             try:
                 db_service.store_evaluation_results(products, evaluation_results)
             except Exception as e:
                 logger.warning(f"Database storage failed: {e}")
 
-        # 6. Store results in Cloud Storage (optional, cheaper alternative)
+        # 7. Store results in Cloud Storage (optional, cheaper alternative)
         if storage_service:
             try:
                 filename = os.path.basename(args.output)
@@ -123,11 +83,11 @@ def main():
             except Exception as e:
                 logger.warning(f"Cloud Storage upload failed: {e}")
 
-        # 7. Write results to local CSV
+        # 8. Write results to local CSV
         write_evaluation_results(evaluation_results, args.output)
 
         logger.info("Catalog quality evaluation completed successfully",
-                   extra={'total_products': len(product_ids), 'evaluated_products': len(products)})
+                   extra={'total_products': len(product_ids), 'total_results': len(evaluation_results)})
 
     except Exception as e:
         logger.error(f"Pipeline execution failed: {e}")

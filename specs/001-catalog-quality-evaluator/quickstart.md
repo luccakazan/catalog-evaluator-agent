@@ -57,7 +57,7 @@ LOG_LEVEL=INFO
 
 2. Run the evaluation:
    ```bash
-   python app/main.py --input products.csv --output results.csv
+   python -m app.main --input products.csv --output results.csv
    ```
 
 3. Check results in `results.csv`:
