@@ -31,9 +31,9 @@ def write_evaluation_results(results: List[EvaluationResult], csv_path: str) -> 
     try:
         data = []
         for result in results:
-            # Clean reason and raw_response to remove newlines and extra spaces
-            clean_reason = (result.reason or '').replace('\n', ' ').replace('\r', ' ').strip()
-            clean_raw_response = (result.raw_response or '').replace('\n', ' ').replace('\r', ' ').strip()
+            # Clean reason and raw_response to remove newlines and escape quotes
+            clean_reason = (result.reason or '').replace('\n', ' ').replace('\r', ' ').replace('"', '""').strip()
+            clean_raw_response = (result.raw_response or '').replace('\n', ' ').replace('\r', ' ').replace('"', '""').strip()
             
             data.append({
                 'product_id': result.product_id,
