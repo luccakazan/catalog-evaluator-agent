@@ -1,7 +1,7 @@
 import os
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
-from typing import List, Optional
+from typing import List
 from datetime import datetime, timezone
 import google.genai as genai
 from app.models.product import Product
@@ -29,8 +29,11 @@ class GeminiEvaluator:
         except Exception as e:
             logger.warning(f"Could not list models: {e}")
 
-        # Batch size for concurrent processing
-        self.batch_size = 5
+        # Concurrency controls (tune via environment variables)
+        self.batch_size = max(1, int(os.getenv('GEMINI_REQUEST_BATCH_SIZE', '50')))
+        self._max_concurrency = max(1, int(os.getenv('GEMINI_MAX_CONCURRENCY', '12')))
+        self._executor = ThreadPoolExecutor(max_workers=self._max_concurrency)
+        self._semaphore = asyncio.Semaphore(self._max_concurrency)
 
     def _create_evaluation_prompt(self, product: Product) -> str:
         """Create prompt for evaluating product description quality."""
@@ -58,20 +61,25 @@ Consider:
 
 Response:"""
 
+    def _generate_content(self, prompt: str):
+        """Call Gemini synchronously to enable delegation to thread pool."""
+        return self.client.models.generate_content(
+            model=self.model,
+            contents=prompt
+        )
+
     async def _evaluate_single_product(self, product: Product) -> EvaluationResult:
         """Evaluate a single product description."""
         try:
             prompt = self._create_evaluation_prompt(product)
 
             # Run in thread pool since google-genai is synchronous
-            loop = asyncio.get_event_loop()
-            with ThreadPoolExecutor() as executor:
+            async with self._semaphore:
+                loop = asyncio.get_running_loop()
                 response = await loop.run_in_executor(
-                    executor, 
-                    lambda: self.client.models.generate_content(
-                        model=self.model,
-                        contents=prompt
-                    )
+                    self._executor,
+                    self._generate_content,
+                    prompt
                 )
 
             # Extract score and reason from response
@@ -138,22 +146,22 @@ Response:"""
 
     async def evaluate_batch(self, products: List[Product]) -> List[EvaluationResult]:
         """Evaluate a batch of products concurrently."""
-        logger.info(f"Starting evaluation of {len(products)} products")
+        total = len(products)
+        if total == 0:
+            return []
 
-        # Process in batches to avoid overwhelming the API
-        results = []
-        for i in range(0, len(products), self.batch_size):
-            batch = products[i:i + self.batch_size]
-            logger.info(f"Processing batch {i//self.batch_size + 1} with {len(batch)} products")
+        logger.info(f"Starting evaluation of {total} products")
 
-            # Evaluate batch concurrently
-            batch_results = await asyncio.gather(
-                *[self._evaluate_single_product(product) for product in batch]
-            )
-            results.extend(batch_results)
+        results: List[EvaluationResult | None] = [None] * total
 
-        logger.info(f"Completed evaluation of {len(products)} products")
-        return results
+        async def evaluate_index(idx: int, item: Product) -> None:
+            results[idx] = await self._evaluate_single_product(item)
+
+        tasks = [evaluate_index(idx, product) for idx, product in enumerate(products)]
+        await asyncio.gather(*tasks)
+
+        logger.info(f"Completed evaluation of {total} products")
+        return [result for result in results if result is not None]
 
     def evaluate_products(self, products: List[Product]) -> List[EvaluationResult]:
         """Synchronous wrapper for batch evaluation."""

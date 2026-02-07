@@ -12,7 +12,7 @@ from app.utils.logger import get_logger
 logger = get_logger(__name__)
 
 
-def test_vtex_api(product_id: str = "12345"):
+def test_vtex_api(product_id: str = "1"):
     """Test VTEX API by fetching a product."""
     load_dotenv()
 
@@ -44,5 +44,5 @@ def test_vtex_api(product_id: str = "12345"):
 if __name__ == "__main__":
     import sys
 
-    product_id = sys.argv[1] if len(sys.argv) > 1 else "12345"
+    product_id = sys.argv[1] if len(sys.argv) > 1 else "1"
     test_vtex_api(product_id)

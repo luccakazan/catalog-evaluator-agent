@@ -35,8 +35,17 @@ def main():
         # 2. Initialize evaluation service
         evaluation_service = EvaluationService()
 
-        # 3. Evaluate catalog
-        products, evaluation_results = evaluation_service.evaluate_catalog(product_ids)
+        # 3. Evaluate catalog in batches and persist results incrementally
+        products: List[Product] = []
+        evaluation_results: List[EvaluationResult] = []
+        write_evaluation_results([], args.output, mode='w', write_header=True)
+
+        for batch_products, batch_results in evaluation_service.evaluate_catalog_batches(product_ids):
+            if batch_products:
+                products.extend(batch_products)
+            if batch_results:
+                evaluation_results.extend(batch_results)
+                write_evaluation_results(batch_results, args.output, mode='a', write_header=False)
 
         if not evaluation_results:
             logger.error("No evaluation results generated")
@@ -83,11 +92,10 @@ def main():
             except Exception as e:
                 logger.warning(f"Cloud Storage upload failed: {e}")
 
-        # 8. Write results to local CSV
-        write_evaluation_results(evaluation_results, args.output)
-
-        logger.info("Catalog quality evaluation completed successfully",
-                   extra={'total_products': len(product_ids), 'total_results': len(evaluation_results)})
+        logger.info(
+            "Catalog quality evaluation completed successfully",
+            extra={'total_products': len(product_ids), 'total_results': len(evaluation_results)}
+        )
 
     except Exception as e:
         logger.error(f"Pipeline execution failed: {e}")

@@ -1,4 +1,5 @@
 import os
+import threading
 import requests
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from typing import Optional, Dict, Any
@@ -20,13 +21,22 @@ class VtexClient:
             raise ValueError("VTEX credentials not configured")
 
         self.base_url = f"https://{self.account_name}.vtexcommercestable.com.br"
-        self.session = requests.Session()
-        self.session.headers.update({
+        self._thread_local: threading.local = threading.local()
+        self._session_headers = {
             'X-VTEX-API-AppKey': self.app_key,
             'X-VTEX-API-AppToken': self.app_token,
             'Content-Type': 'application/json',
             'Accept': 'application/json'
-        })
+        }
+
+    def _get_session(self) -> requests.Session:
+        """Return a thread-local requests session to keep headers and TCP reuse."""
+        session = getattr(self._thread_local, 'session', None)
+        if session is None:
+            session = requests.Session()
+            session.headers.update(self._session_headers)
+            self._thread_local.session = session
+        return session
 
     @retry(
         stop=stop_after_attempt(3),
@@ -38,7 +48,7 @@ class VtexClient:
         url = f"{self.base_url}{endpoint}"
         logger.info(f"Making request to {url}")
 
-        response = self.session.get(url)
+        response = self._get_session().get(url)
         response.raise_for_status()
 
         return response.json()
